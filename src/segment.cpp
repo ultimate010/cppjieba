@@ -20,7 +20,7 @@ void cut(const ISegment * seg, const char * const filePath)
     {
         if(!line.empty())
         {
-            cout << line << endl;
+//            cout << line << endl;
             res.clear();
             if(!seg->cut(line, res))
             {
@@ -28,8 +28,11 @@ void cut(const ISegment * seg, const char * const filePath)
             }
             else
             {
-                print(join(res.begin(), res.end(), "/"));
+//                print(join(res.begin(), res.end(), "/"));
+                cout <<join(res.begin(), res.end(), "/") <<endl;
             }
+        }else{
+            cout <<endl;
         }
     }
 }
