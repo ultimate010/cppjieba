@@ -1,45 +1,54 @@
 #include <iostream>
 #include <ctime>
 #include <fstream>
-#include "../src/Limonp/ArgvContext.hpp"
-#include "../src/Limonp/io_functs.hpp"
 #include "../src/MPSegment.hpp"
 #include "../src/HMMSegment.hpp"
 #include "../src/MixSegment.hpp"
+#include "../src/KeywordExtractor.hpp"
+#include "../src/limonp/Colors.hpp"
 
-using namespace CppJieba;
+using namespace cppjieba;
 
-void cut(const ISegment * seg, const char * const filePath, size_t times = 10)
-{
-    ifstream ifile(filePath);
-    if(!ifile)
-    {
-        LogFatal("open file[%s] failed.", filePath);
-        return;
-    }
-    LogInfo("open file[%s].", filePath);
-    vector<string> res;
-    string doc;
-    loadFile2Str(filePath, doc);
-    for(uint i = 0; i < times; i ++)
-    {
-        LogInfo("times[%u]", i);
-        res.clear();
-        seg->cut(doc, res);
-    }
+void Cut(size_t times = 50) {
+  MixSegment seg("../dict/jieba.dict.utf8", "../dict/hmm_model.utf8");
+  vector<string> res;
+  string doc;
+  ifstream ifs("../test/testdata/weicheng.utf8");
+  assert(ifs);
+  doc << ifs;
+  long beginTime = clock();
+  for (size_t i = 0; i < times; i ++) {
+    printf("process [%3.0lf %%]\r", 100.0*(i+1)/times);
+    fflush(stdout);
+    res.clear();
+    seg.Cut(doc, res);
+  }
+  printf("\n");
+  long endTime = clock();
+  ColorPrintln(GREEN, "Cut: [%.3lf seconds]time consumed.", double(endTime - beginTime)/CLOCKS_PER_SEC);
 }
 
-int main(int argc, char ** argv)
-{
-    MixSegment seg("../dict/jieba.dict.utf8", "../dict/hmm_model.utf8");
-    if(!seg)
-    {
-        cout<<"seg init failed."<<endl;
-        return EXIT_FAILURE;
-    }
-    long beginTime = clock();
-    cut(&seg, "../test/testdata/weicheng.utf8");
-    long endTime = clock();
-    printf("[%.3lf seconds]time consumeed.\n", double(endTime - beginTime)/CLOCKS_PER_SEC);
-    return EXIT_SUCCESS;
+void Extract(size_t times = 400) {
+  KeywordExtractor Extractor("../dict/jieba.dict.utf8", "../dict/hmm_model.utf8", "../dict/idf.utf8", "../dict/stop_words.utf8");
+  vector<string> words;
+  string doc;
+  ifstream ifs("../test/testdata/review.100");
+  assert(ifs);
+  doc << ifs;
+  long beginTime = clock();
+  for (size_t i = 0; i < times; i ++) {
+    printf("process [%3.0lf %%]\r", 100.0*(i+1)/times);
+    fflush(stdout);
+    words.clear();
+    Extractor.Extract(doc, words, 5);
+  }
+  printf("\n");
+  long endTime = clock();
+  ColorPrintln(GREEN, "Extract: [%.3lf seconds]time consumed.", double(endTime - beginTime)/CLOCKS_PER_SEC);
+}
+
+int main(int argc, char ** argv) {
+  Cut();
+  Extract();
+  return EXIT_SUCCESS;
 }

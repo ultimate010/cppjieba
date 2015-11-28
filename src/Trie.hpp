@@ -1,272 +1,176 @@
-/************************************
- * file enc : ASCII
- * author   : wuyanyi09@gmail.com
- ************************************/
-#ifndef CPPJIEBA_TRIE_H
-#define CPPJIEBA_TRIE_H
+#ifndef CPPJIEBA_TRIE_HPP
+#define CPPJIEBA_TRIE_HPP
 
-#include <iostream>
-#include <fstream>
-#include <map>
-#include <cstring>
-#include <stdint.h>
-#include <cmath>
-#include <limits>
-#include "Limonp/str_functs.hpp"
-#include "Limonp/logger.hpp"
-#include "Limonp/InitOnOff.hpp"
-#include "TransCode.hpp"
+#include "limonp/StdExtension.hpp"
+#include <vector>
+#include <queue>
 
+namespace cppjieba {
+using namespace std;
 
+const size_t MAX_WORD_LENGTH = 512;
 
-namespace CppJieba
-{
-    using namespace Limonp;
-    const double MIN_DOUBLE = -3.14e+100;
-    const double MAX_DOUBLE = 3.14e+100;
-    const size_t DICT_COLUMN_NUM = 3;
-    typedef unordered_map<uint16_t, struct TrieNode*> TrieNodeMap;
-    struct TrieNode
-    {
-        TrieNodeMap hmap;
-        bool isLeaf;
-        size_t nodeInfoPos;
-        TrieNode()
-        {
-            isLeaf = false;
-            nodeInfoPos = 0;
-        }
-    };
+struct DictUnit {
+  Unicode word;
+  double weight;
+  string tag;
+};
 
-    struct TrieNodeInfo
-    {
-        Unicode word;
-        size_t freq;
-        string tag;
-        double logFreq; //logFreq = log(freq/sum(freq));
-        TrieNodeInfo():freq(0),logFreq(0.0)
-        {}
-        TrieNodeInfo(const TrieNodeInfo& nodeInfo):word(nodeInfo.word), freq(nodeInfo.freq), tag(nodeInfo.tag), logFreq(nodeInfo.logFreq)
-        {}
-        TrieNodeInfo(const Unicode& _word):word(_word),freq(0),logFreq(MIN_DOUBLE)
-        {}
-    };
+// for debugging
+inline ostream & operator << (ostream& os, const DictUnit& unit) {
+  string s;
+  s << unit.word;
+  return os << string_format("%s %s %.3lf", s.c_str(), unit.tag.c_str(), unit.weight);
+}
 
-    inline ostream& operator << (ostream& os, const TrieNodeInfo & nodeInfo)
-    {
-        return os << nodeInfo.word << ":" << nodeInfo.freq << ":" << nodeInfo.tag << ":" << nodeInfo.logFreq ;
+struct Dag {
+  uint16_t rune;
+  LocalVector<pair<size_t, const DictUnit*> > nexts;
+  const DictUnit * pInfo;
+  double weight;
+  size_t nextPos;
+  Dag():rune(0), pInfo(NULL), weight(0.0), nextPos(0) {
+  }
+};
+
+typedef Rune TrieKey;
+
+class TrieNode {
+ public :
+  TrieNode(): next(NULL), ptValue(NULL) {
+  }
+ public:
+  typedef unordered_map<TrieKey, TrieNode*> NextMap;
+  NextMap *next;
+  const DictUnit *ptValue;
+};
+
+class Trie {
+ public:
+  static const size_t BASE_SIZE = (1 << (8 * (sizeof(TrieKey))));
+  Trie(const vector<Unicode>& keys, const vector<const DictUnit*>& valuePointers) {
+    CreateTrie(keys, valuePointers);
+  }
+  ~Trie() {
+    for (size_t i = 0; i < BASE_SIZE; i++) {
+      if (_base[i].next == NULL) {
+        continue;
+      }
+      for (TrieNode::NextMap::iterator it = _base[i].next->begin(); it != _base[i].next->end(); it++) {
+        DeleteNode(it->second);
+        it->second = NULL;
+      }
+      delete _base[i].next;
+      _base[i].next = NULL;
+    }
+  }
+
+  const DictUnit* Find(Unicode::const_iterator begin, Unicode::const_iterator end) const {
+    if (begin == end) {
+      return NULL;
     }
 
-    typedef map<size_t, const TrieNodeInfo*> DagType;
+    const TrieNode* ptNode = _base + (*(begin++));
+    TrieNode::NextMap::const_iterator citer;
+    for (Unicode::const_iterator it = begin; it != end; it++) {
+      if (NULL == ptNode->next) {
+        return NULL;
+      }
+      citer = ptNode->next->find(*it);
+      if (ptNode->next->end() == citer) {
+        return NULL;
+      }
+      ptNode = citer->second;
+    }
+    return ptNode->ptValue;
+  }
 
-    class Trie: public InitOnOff
-    {
+  void Find(Unicode::const_iterator begin, 
+        Unicode::const_iterator end, 
+        vector<struct Dag>&res, 
+        size_t max_word_len = MAX_WORD_LENGTH) const {
+    res.resize(end - begin);
 
-        private:
-            TrieNode* _root;
-            vector<TrieNodeInfo> _nodeInfos;
+    const TrieNode *ptNode = NULL;
+    TrieNode::NextMap::const_iterator citer;
+    for (size_t i = 0; i < size_t(end - begin); i++) {
+      Rune rune = *(begin + i);
+      ptNode = _base + rune;
+      res[i].rune = rune;
+      assert(res[i].nexts.empty());
 
-            int64_t _freqSum;
-            double _minLogFreq;
+      res[i].nexts.push_back(pair<size_t, const DictUnit*>(i, ptNode->ptValue));
 
-        public:
-            Trie()
-            {
-                _root = NULL;
-                _freqSum = 0;
-                _minLogFreq = MAX_DOUBLE;
-                _setInitFlag(false);
-            }
-            Trie(const string& filePath)
-            {
-                Trie();
-                _setInitFlag(init(filePath));
-            }
-            ~Trie()
-            {
-                _deleteNode(_root);
-            }
-        public:
-            bool init(const string& filePath)
-            {
-                assert(!_getInitFlag());
+      for (size_t j = i + 1; j < size_t(end - begin) && (j - i + 1) <= max_word_len ; j++) {
+        if (ptNode->next == NULL) {
+          break;
+        }
+        citer = ptNode->next->find(*(begin + j));
+        if (ptNode->next->end() == citer) {
+          break;
+        }
+        ptNode = citer->second;
+        if (NULL != ptNode->ptValue) {
+          res[i].nexts.push_back(pair<size_t, const DictUnit*>(j, ptNode->ptValue));
+        }
+      }
+    }
+  }
 
-                _root = new TrieNode;
-                assert(_root);
-                if(!_trieInsert(filePath))
-                {
-                    LogError("_trieInsert failed.");
-                    return false;
-                }
-                _countWeight();
-                return _setInitFlag(true);
-            }
+  void InsertNode(const Unicode& key, const DictUnit* ptValue) {
+    if (key.begin() == key.end()) {
+      return;
+    }
 
-        public:
-            const TrieNodeInfo* find(Unicode::const_iterator begin, Unicode::const_iterator end)const
-            {
-                TrieNodeMap::const_iterator citer;
-                TrieNode* p = _root;
-                for(Unicode::const_iterator it = begin; it != end; it++)
-                {
-                    uint16_t chUni = *it;
-                    citer = p->hmap.find(chUni);
-                    if(p-> hmap.end() == citer)
-                    {
-                        return NULL;
-                    }
-                    p = citer->second;
-                }
-                if(p->isLeaf)
-                {
-                    return &(_nodeInfos[p->nodeInfoPos]);
-                }
-                return NULL;
-            }
+    TrieNode::NextMap::const_iterator kmIter;
+    Unicode::const_iterator citer= key.begin();
+    TrieNode *ptNode = _base + (*(citer++));
+    for (; citer != key.end(); citer++) {
+      if (NULL == ptNode->next) {
+        ptNode->next = new TrieNode::NextMap;
+      }
+      kmIter = ptNode->next->find(*citer);
+      if (ptNode->next->end() == kmIter) {
+        TrieNode *nextNode = new TrieNode;
 
-            bool find(Unicode::const_iterator begin, Unicode::const_iterator end, vector<pair<size_t, const TrieNodeInfo*> >& res) const
-            {
-                TrieNodeMap::const_iterator citer;
-                TrieNode* p = _root;
-                for (Unicode::const_iterator itr = begin; itr != end; itr++)
-                {
-                    citer = p->hmap.find(*itr);
-                    if(p->hmap.end() == citer)
-                    {
-                        break;
-                    }
-                    p = citer->second;
-                    if(p->isLeaf)
-                    {
-                        res.push_back(make_pair(itr-begin, &_nodeInfos[p->nodeInfoPos]));
-                    }
-                }
-                return !res.empty();
-            }
+        (*(ptNode->next))[*citer] = nextNode;
+        ptNode = nextNode;
+      } else {
+        ptNode = kmIter->second;
+      }
+    }
+    ptNode->ptValue = ptValue;
+  }
 
-            bool find(Unicode::const_iterator begin, Unicode::const_iterator end, size_t offset, DagType & res) const
-            {
-                TrieNode* p = _root;
-                TrieNodeMap::const_iterator citer;
-                for (Unicode::const_iterator itr = begin; itr != end; itr++)
-                {
-                    citer = p->hmap.find(*itr);
-                    if(p->hmap.end() == citer)
-                    {
-                        break;
-                    }
-                    p = citer->second;
-                    if(p->isLeaf)
-                    {
-                        res[itr - begin + offset] = &_nodeInfos[p->nodeInfoPos];
-                    }
-                }
-                return !res.empty();
-            }
+ private:
+  void CreateTrie(const vector<Unicode>& keys, const vector<const DictUnit*>& valuePointers) {
+    if (valuePointers.empty() || keys.empty()) {
+      return;
+    }
+    assert(keys.size() == valuePointers.size());
 
-        public:
-            double getMinLogFreq() const {return _minLogFreq;};
+    for (size_t i = 0; i < keys.size(); i++) {
+      InsertNode(keys[i], valuePointers[i]);
+    }
+  }
 
-        private:
-            void _insert(const TrieNodeInfo& nodeInfo, size_t nodeInfoPos)
-            {
-                const Unicode& unico = nodeInfo.word;
-                TrieNode* p = _root;
-                for(size_t i = 0; i < unico.size(); i++)
-                {
-                    uint16_t cu = unico[i];
-                    assert(p);
-                    if(!isIn(p->hmap, cu))
-                    {
-                        TrieNode * next = new TrieNode;
-                        assert(next);
-                        p->hmap[cu] = next;
-                        p = next;
-                    }
-                    else
-                    {
-                        p = p->hmap[cu];
-                    }
-                }
+  void DeleteNode(TrieNode* node) {
+    if (NULL == node) {
+      return;
+    }
+    if (NULL != node->next) {
+      TrieNode::NextMap::iterator it;
+      for (it = node->next->begin(); it != node->next->end(); it++) {
+        DeleteNode(it->second);
+      }
+      delete node->next;
+      node->next = NULL;
+    }
+    delete node;
+  }
 
-                p->isLeaf = true;
-                p->nodeInfoPos = nodeInfoPos;
-            }
-
-        private:
-            bool _trieInsert(const string& filePath)
-            {
-                ifstream ifs(filePath.c_str());
-                if(!ifs)
-                {
-                    LogError("open %s failed.", filePath.c_str());
-                    return false;
-                }
-                string line;
-                vector<string> buf;
-
-                TrieNodeInfo nodeInfo;
-                for(size_t lineno = 0 ; getline(ifs, line); lineno++)
-                {
-                    split(line, buf, " ");
-                    assert(buf.size() == DICT_COLUMN_NUM);
-                    if(!TransCode::decode(buf[0], nodeInfo.word))
-                    {
-                        LogError("line[%u:%s] illegal.", lineno, line.c_str());
-                        return false;
-                    }
-                    nodeInfo.freq = atoi(buf[1].c_str());
-                    nodeInfo.tag = buf[2];
-                    
-                    _nodeInfos.push_back(nodeInfo);
-
-                }
-                for(size_t i = 0; i < _nodeInfos.size(); i++)
-                {
-                    _insert(_nodeInfos[i], i);
-                }
-                return true;
-            }
-            void _countWeight()
-            {
-                //freq total freq
-                _freqSum = 0;
-                for(size_t i = 0; i < _nodeInfos.size(); i++)
-                {
-                    _freqSum += _nodeInfos[i].freq;
-                }
-
-                assert(_freqSum);
-
-                //normalize
-                for(size_t i = 0; i < _nodeInfos.size(); i++)
-                {
-                    TrieNodeInfo& nodeInfo = _nodeInfos[i];
-                    assert(nodeInfo.freq);
-                    nodeInfo.logFreq = log(double(nodeInfo.freq)/double(_freqSum));
-                    if(_minLogFreq > nodeInfo.logFreq)
-                    {
-                        _minLogFreq = nodeInfo.logFreq;
-                    }
-                }
-
-            }
-
-            void _deleteNode(TrieNode* node)
-            {
-                if(!node)
-                {
-                    return;
-                }
-                for(TrieNodeMap::iterator it = node->hmap.begin(); it != node->hmap.end(); it++)
-                {
-                    TrieNode* next = it->second;
-                    _deleteNode(next);
-                }
-                delete node;
-            }
-
-    };
+  TrieNode _base[BASE_SIZE];
+};
 }
 
 #endif

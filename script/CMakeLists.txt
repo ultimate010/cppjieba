@@ -1,2 +1,6 @@
-INSTALL(PROGRAMS cjserver DESTINATION /etc/init.d/)
-INSTALL(PROGRAMS cjseg.sh DESTINATION bin)
+INSTALL(PROGRAMS 
+    cjserver.start 
+    cjserver.stop 
+    DESTINATION 
+    script
+)

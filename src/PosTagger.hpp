@@ -2,62 +2,78 @@
 #define CPPJIEBA_POS_TAGGING_H
 
 #include "MixSegment.hpp"
-#include "Limonp/str_functs.hpp"
-#include "Trie.hpp"
+#include "limonp/StringUtil.hpp"
+#include "DictTrie.hpp"
 
-namespace CppJieba
-{
-    using namespace Limonp;
+namespace cppjieba {
+using namespace limonp;
 
-    class PosTagger: public InitOnOff
-    {
-        private:
-            MixSegment _segment;
-            Trie _trie;
+static const char* const POS_M = "m";
+static const char* const POS_ENG = "eng";
+static const char* const POS_X = "x";
 
-        public:
-            PosTagger(){_setInitFlag(false);};
-            explicit PosTagger(const string& dictPath, const string& hmmFilePath, const string& charStatus, const string& startProb, const string& emitProb, const string& endProb, const string& transProb)
-            {
-                _setInitFlag(init(dictPath, hmmFilePath, charStatus, startProb, emitProb, endProb, transProb));
-            };
-            ~PosTagger(){};
-        public:
-            bool init(const string& dictPath, const string& hmmFilePath, const string& charStatus, const string& startProb, const string& emitProb, const string& endProb, const string& transProb)
-            {
-                
-                assert(!_getInitFlag());
-                _trie.init(dictPath);
-                assert(_trie);
-                return _setInitFlag(_segment.init(dictPath, hmmFilePath));
-            };
+class PosTagger {
+ public:
+  PosTagger(const string& dictPath,
+    const string& hmmFilePath,
+    const string& userDictPath = "")
+    : segment_(dictPath, hmmFilePath, userDictPath) {
+  }
+  PosTagger(const DictTrie* dictTrie, const HMMModel* model) 
+    : segment_(dictTrie, model) {
+  }
+  ~PosTagger() {
+  }
 
-            bool tag(const string& src, vector<pair<string, string> >& res)
-            {
-                assert(_getInitFlag());
-                vector<string> cutRes;
-                if (!_segment.cut(src, cutRes))
-                {
-                    LogError("_mixSegment cut failed");
-                    return false;
-                }
+  bool Tag(const string& src, vector<pair<string, string> >& res) const {
+    vector<string> CutRes;
+    segment_.Cut(src, CutRes);
 
-                const TrieNodeInfo *tmp = NULL;
-                Unicode unico;
-                for (vector<string>::iterator itr = cutRes.begin(); itr != cutRes.end(); ++itr)
-                {
-                    if (!TransCode::decode(*itr, unico))
-                    {
-                        LogError("decode failed.");
-                        return false;
-                    }
-                    tmp = _trie.find(unico.begin(), unico.end());
-                    res.push_back(make_pair(*itr, tmp == NULL ? "x" : tmp->tag));
-                }
-                tmp = NULL;
-                return !res.empty();
-            }
-    };
-}
+    const DictUnit *tmp = NULL;
+    Unicode unico;
+    const DictTrie * dict = segment_.GetDictTrie();
+    assert(dict != NULL);
+    for (vector<string>::iterator itr = CutRes.begin(); itr != CutRes.end(); ++itr) {
+      if (!TransCode::Decode(*itr, unico)) {
+        LogError("Decode failed.");
+        return false;
+      }
+      tmp = dict->Find(unico.begin(), unico.end());
+      if (tmp == NULL || tmp->tag.empty()) {
+        res.push_back(make_pair(*itr, SpecialRule(unico)));
+      } else {
+        res.push_back(make_pair(*itr, tmp->tag));
+      }
+    }
+    return !res.empty();
+  }
+ private:
+  const char* SpecialRule(const Unicode& unicode) const {
+    size_t m = 0;
+    size_t eng = 0;
+    for (size_t i = 0; i < unicode.size() && eng < unicode.size() / 2; i++) {
+      if (unicode[i] < 0x80) {
+        eng ++;
+        if ('0' <= unicode[i] && unicode[i] <= '9') {
+          m++;
+        }
+      }
+    }
+    // ascii char is not found
+    if (eng == 0) {
+      return POS_X;
+    }
+    // all the ascii is number char
+    if (m == eng) {
+      return POS_M;
+    }
+    // the ascii chars contain english letter
+    return POS_ENG;
+  }
+
+  MixSegment segment_;
+}; // class PosTagger
+
+} // namespace cppjieba
 
 #endif

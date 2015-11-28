@@ -1,205 +1,114 @@
-/************************************
- * file enc : ASCII
- * author   : wuyanyi09@gmail.com
- ************************************/
 #ifndef CPPJIEBA_MPSEGMENT_H
 #define CPPJIEBA_MPSEGMENT_H
 
 #include <algorithm>
 #include <set>
 #include <cassert>
-#include "Limonp/logger.hpp"
-#include "Trie.hpp"
-#include "Trie.hpp"
-#include "ISegment.hpp"
+#include "limonp/Logger.hpp"
+#include "DictTrie.hpp"
 #include "SegmentBase.hpp"
 
-namespace CppJieba
-{
+namespace cppjieba {
 
-    struct SegmentChar 
-    {
-        uint16_t uniCh;
-        DagType dag;
-        const TrieNodeInfo * pInfo;
-        double weight;
+class MPSegment: public SegmentBase {
+ public:
+  MPSegment(const string& dictPath, const string& userDictPath = "") {
+    dictTrie_ = new DictTrie(dictPath, userDictPath);
+    isNeedDestroy_ = true;
+    LogInfo("MPSegment init(%s) ok", dictPath.c_str());
+  }
+  MPSegment(const DictTrie* dictTrie)
+    : dictTrie_(dictTrie), isNeedDestroy_(false) {
+    assert(dictTrie_);
+  }
+  ~MPSegment() {
+    if (isNeedDestroy_) {
+      delete dictTrie_;
+    }
+  }
 
-        SegmentChar(uint16_t uni):uniCh(uni), pInfo(NULL), weight(0.0)
-        {}
-    };
-    typedef vector<SegmentChar> SegmentContext;
+  void Cut(const string& sentence, 
+        vector<string>& words, 
+        size_t max_word_len = MAX_WORD_LENGTH) const {
+    PreFilter pre_filter(symbols_, sentence);
+    PreFilter::Range range;
+    vector<Unicode> uwords;
+    uwords.reserve(sentence.size());
+    while (pre_filter.HasNext()) {
+      range = pre_filter.Next();
+      Cut(range.begin, range.end, uwords, max_word_len);
+    }
+    TransCode::Encode(uwords, words);
+  }
+  void Cut(Unicode::const_iterator begin,
+           Unicode::const_iterator end,
+           vector<Unicode>& words,
+           size_t max_word_len = MAX_WORD_LENGTH) const {
+    vector<Dag> dags;
+    dictTrie_->Find(begin, 
+          end, 
+          dags,
+          max_word_len);
+    CalcDP(dags);
+    CutByDag(dags, words);
+  }
 
-    class MPSegment: public SegmentBase
-    {
-        protected:
-            Trie _trie;
+  const DictTrie* GetDictTrie() const {
+    return dictTrie_;
+  }
 
-        public:
-            MPSegment(){_setInitFlag(false);};
-            explicit MPSegment(const string& dictPath)
-            {
-                _setInitFlag(init(dictPath));
-            };
-            virtual ~MPSegment(){};
-        public:
-            bool init(const string& dictPath)
-            {
-                if(_getInitFlag())
-                {
-                    LogError("already inited before now.");
-                    return false;
-                }
-                _trie.init(dictPath);
-                assert(_trie);
-                LogInfo("MPSegment init(%s) ok", dictPath.c_str());
-                return _setInitFlag(true);
-            }
-        public:
-            using SegmentBase::cut;
-            virtual bool cut(Unicode::const_iterator begin, Unicode::const_iterator end, vector<string>& res)const
-            {
-                assert(_getInitFlag());
+  bool IsUserDictSingleChineseWord(const Rune& value) const {
+    return dictTrie_->IsUserDictSingleChineseWord(value);
+  }
+ private:
+  void CalcDP(vector<Dag>& dags) const {
+    size_t nextPos;
+    const DictUnit* p;
+    double val;
 
-                vector<TrieNodeInfo> segWordInfos;
-                if(!cut(begin, end, segWordInfos))
-                {
-                    return false;
-                }
-                string tmp;
-                for(size_t i = 0; i < segWordInfos.size(); i++)
-                {
-                    if(TransCode::encode(segWordInfos[i].word, tmp))
-                    {
-                        res.push_back(tmp);
-                    }
-                    else
-                    {
-                        LogError("encode failed.");
-                    }
-                }
-                return true;
-            }
+    for (vector<Dag>::reverse_iterator rit = dags.rbegin(); rit != dags.rend(); rit++) {
+      rit->pInfo = NULL;
+      rit->weight = MIN_DOUBLE;
+      assert(!rit->nexts.empty());
+      for (LocalVector<pair<size_t, const DictUnit*> >::const_iterator it = rit->nexts.begin(); it != rit->nexts.end(); it++) {
+        nextPos = it->first;
+        p = it->second;
+        val = 0.0;
+        if (nextPos + 1 < dags.size()) {
+          val += dags[nextPos + 1].weight;
+        }
 
-            bool cut(Unicode::const_iterator begin , Unicode::const_iterator end, vector<TrieNodeInfo>& segWordInfos)const
-            {
-                if(!_getInitFlag())
-                {
-                    LogError("not inited.");
-                    return false;
-                }
-                SegmentContext segContext;
+        if (p) {
+          val += p->weight;
+        } else {
+          val += dictTrie_->GetMinWeight();
+        }
+        if (val > rit->weight) {
+          rit->pInfo = p;
+          rit->weight = val;
+        }
+      }
+    }
+  }
+  void CutByDag(const vector<Dag>& dags, 
+        vector<Unicode>& words) const {
+    size_t i = 0;
+    while (i < dags.size()) {
+      const DictUnit* p = dags[i].pInfo;
+      if (p) {
+        words.push_back(p->word);
+        i += p->word.size();
+      } else { //single chinese word
+        words.push_back(Unicode(1, dags[i].rune));
+        i++;
+      }
+    }
+  }
 
-                //calc DAG
-                if(!_calcDAG(begin, end, segContext))
-                {
-                    LogError("_calcDAG failed.");
-                    return false;
-                }
+  const DictTrie* dictTrie_;
+  bool isNeedDestroy_;
+}; // class MPSegment
 
-                if(!_calcDP(segContext))
-                {
-                    LogError("_calcDP failed.");
-                    return false;
-                }
-
-                if(!_cut(segContext, segWordInfos))
-                {
-                    LogError("_cut failed.");
-                    return false;
-                }
-
-                return true;
-            }
-
-        private:
-            bool _calcDAG(Unicode::const_iterator begin, Unicode::const_iterator end, SegmentContext& segContext) const
-            {
-                if(begin >= end)
-                {
-                    LogError("begin >= end.");
-                    return false;
-                }
-
-                for(Unicode::const_iterator it = begin; it != end; it++)
-                {
-                    SegmentChar schar(*it);
-                    size_t i = it - begin;
-                    _trie.find(it, end, i, schar.dag);
-                    //DagType::iterator dagIter;
-                    if(schar.dag.end() ==  schar.dag.find(i))
-                    {
-                        schar.dag[i] = NULL;
-                    }
-                    segContext.push_back(schar);
-                }
-                return true;
-            }
-            bool _calcDP(SegmentContext& segContext)const
-            {
-                if(segContext.empty())
-                {
-                    LogError("segContext empty");
-                    return false;
-                }
-
-                for(int i = segContext.size() - 1; i >= 0; i--)
-                {
-                    segContext[i].pInfo = NULL;
-                    segContext[i].weight = MIN_DOUBLE;
-                    for(DagType::const_iterator it = segContext[i].dag.begin(); it != segContext[i].dag.end(); it++)
-                    {
-                        size_t nextPos = it->first;
-                        const TrieNodeInfo* p = it->second;
-                        double val = 0.0;
-                        if(nextPos + 1 < segContext.size())
-                        {
-                            val += segContext[nextPos + 1].weight;
-                        }
-
-                        if(p)
-                        {
-                            val += p->logFreq; 
-                        }
-                        else
-                        {
-                            val += _trie.getMinLogFreq();
-                        }
-                        if(val > segContext[i].weight)
-                        {
-                            segContext[i].pInfo = p;
-                            segContext[i].weight = val;
-                        }
-                    }
-                }
-                return true;
-
-            }
-            bool _cut(SegmentContext& segContext, vector<TrieNodeInfo>& res)const
-            {
-                size_t i = 0;
-                while(i < segContext.size())
-                {
-                    const TrieNodeInfo* p = segContext[i].pInfo;
-                    if(p)
-                    {
-                        res.push_back(*p);
-                        i += p->word.size();
-                    }
-                    else//single chinese word
-                    {
-                        TrieNodeInfo nodeInfo;
-                        nodeInfo.word.push_back(segContext[i].uniCh);
-                        nodeInfo.freq = 0;
-                        nodeInfo.logFreq = _trie.getMinLogFreq();
-                        res.push_back(nodeInfo);
-                        i++;
-                    }
-                }
-                return true;
-            }
-
-
-    };
-}
+} // namespace cppjieba
 
 #endif

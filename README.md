@@ -1,74 +1,193 @@
-#CppJieba是"结巴"中文分词的C++版本
+# CppJieba [![Build Status](https://travis-ci.org/yanyiwu/cppjieba.png?branch=master)](https://travis-ci.org/yanyiwu/cppjieba)
 
-功能性的代码全写成hpp文件，此处的hpp文件是将cpp和h两个文件全都写在hpp文件里面（当然需要遵守相关约束）
+## 简介
 
-之所以全写成hpp文件，是因为这样在别的项目需要使用到中文分词功能的时候直接`#include"xx.hpp" `进来就可以使用，无需麻烦的链接。
+CppJieba是"结巴(Jieba)"中文分词的C++版本
 
-实践证明写成hpp使用起来真的很爽，在后面提到的在iOS应用中的使用，和包装成`Node.js`的扩展[NodeJieba]都特别顺利。
+代码细节详解请见 [代码详解]
 
-如果对代码细节感兴趣的请见 [代码详解]
+## 特性
 
-## 中文编码
++ 源代码都写进头文件`src/*.hpp`里，`include`即可使用。
++ 支持`utf-8, gbk`编码，但是推荐使用`utf-8`编码， 因为`gbk`编码缺少严格测试，慎用。
++ 内置分词服务`server/server.cpp`，在linux环境下可安装使用(可选)，可通过http参数选择不同分词算法进行分词。
++ 项目自带较为完善的单元测试，核心功能中文分词(utf8)的稳定性接受过线上环境检验。
++ 支持载自定义用户词典。
++ 支持 `linux` , `mac osx` 操作系统。
++ 支持 `Docker`。
++ 提供 C语言 api接口调用 [cjieba]。
 
-现在支持utf8,gbk编码的分词。   
+## 用法
 
-## 安装与使用
+### 依赖软件
 
-### 依赖
+* `g++ (version >= 4.1 recommended) or clang++`;
+* `cmake (version >= 2.6 recommended)`;
 
-* g++ (version >= 4.1 recommended);
-* cmake (version >= 2.6 recommended);
-
-### 下载和安装
+### 下载和编译
 
 ```sh
-wget https://github.com/aszxqw/cppjieba/archive/master.zip -O cppjieba-master.zip
-unzip cppjieba-master.zip
-cd cppjieba-master
+git clone --depth=10 --branch=master git://github.com/yanyiwu/cppjieba.git
+cd cppjieba
 mkdir build
 cd build
 cmake ..
-# 默认是utf8编码，如果要使用gbk编码则使用下句cmake命令
-# cmake .. -DENC=GBK
 make
-sudo make install
 ```
 
-#### 测试
+有兴趣的可以跑跑测试(可选):
 
-```sh
-make test 
 ```
+make test
+```
+
+## Demo
+
+```
+./demo
+```
+
+结果示例：
+
+```
+[demo] METHOD_MP
+我/是/拖拉机/学院/手扶拖拉机/专业/的/。/不用/多久/，/我/就/会/升职/加薪/，/当/上/C/E/O/，/走上/人生/巅峰/。
+
+[demo] METHOD_HMM
+我/是/拖拉机/学院/手/扶/拖拉机/专业/的/。/不用/多久/，/我/就/会升/职加薪/，/当上/CEO/，/走上/人生/巅峰/。
+
+[demo] METHOD_MIX
+我/是/拖拉机/学院/手扶拖拉机/专业/的/。/不用/多久/，/我/就/会/升职/加薪/，/当上/CEO/，/走上/人生/巅峰/。
+
+[demo] METHOD_FULL
+我/是/拖拉/拖拉机/学院/手扶/手扶拖拉机/拖拉/拖拉机/专业/的/。/不用/多久/，/我/就/会升/升职/加薪/，/当上/C/E/O/，/走上/人生/巅峰/。
+[demo] METHOD_QUERY
+我/是/拖拉机/学院/手扶/手扶拖拉机/拖拉/拖拉机/专业/的/。/不用/多久/，/我/就/会/升职/加薪/，/当上/CEO/，/走上/人生/巅峰/。
+
+[demo] TAGGING
+我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。
+["我:r", "是:v", "拖拉机:n", "学院:n", "手扶拖拉机:n", "专业:n", "的:uj", "。:x", "不用:v", "多久:m", "，:x", "我:r", "就:d", "会:v", "升职:v", "加薪:nr", "，:x", "当上:t", "CEO:eng", "，:x", "走上:v", "人生:n", "巅峰:n", "。:x"]
+
+[demo] KEYWORD
+我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。
+["CEO:11.7392", "升职:10.8562", "加薪:10.6426", "手扶拖拉机:10.0089", "巅峰:9.49396"]
+```
+
+详细请看 `test/demo.cpp`.
+
+
+## 服务使用
+
+服务默认使用 MixSegment 切词方式，如果想要修改成其他方式，请参考 `server/server.cpp` 源码文件。
+将对应的方式的代码行注释去掉，重新编译即可。
 
 ### 启动服务
 
-因为服务的后台运行需要`start-stop-daemon`，在ubuntu下是自带的。但是在CentOS下就需要自己安装了。
-
 ```
-#Usage: /etc/init.d/cjserver {start|stop|restart|force-reload}
-#启动
-sudo /etc/init.d/cjserver start
-#停止
-sudo /etc/init.d/cjserver stop
+./bin/cjserver ../conf/server_example.conf
 ```
 
-#### 测试服务
+### 客户端请求示例
 
-然后用chrome浏览器打开`http://127.0.0.1:11200/?key=南京市长江大桥`
-(用chrome的原因是chrome的默认编码就是utf-8)
+```
+curl "http://127.0.0.1:11200/?key=南京市长江大桥"
+```
 
-或者用命令 `curl "http://127.0.0.1:11200/?key=南京市长江大桥"` (ubuntu中的curl安装命令`sudo apt-get install curl`)
+```
+["南京市", "长江大桥"]
+```
 
+```
+curl "http://127.0.0.1:11200/?key=南京市长江大桥&format=simple"
+```
 
-### 卸载
+```
+南京市 长江大桥
+```
+
+默认切词算法是MixSegment切词算法，如果想要使用其他算法切词，可以使用参数method来设置。
+示例如下：
+
+```
+curl "http://127.0.0.1:11200/?key=南京市长江大桥&format=simple&method=MP"
+curl "http://127.0.0.1:11200/?key=南京市长江大桥&format=simple&method=HMM"
+curl "http://127.0.0.1:11200/?key=南京市长江大桥&format=simple&method=MIX"
+curl "http://127.0.0.1:11200/?key=南京市长江大桥&format=simple&method=FULL"
+curl "http://127.0.0.1:11200/?key=南京市长江大桥&format=simple&method=QUERY"
+```
+
+用 chrome 浏览器打开也行 ( chrome 设置默认编码是`utf-8`):
+
+同时，也支持HTTP POST模式，使用如下调用:
+
+```
+curl -d "南京市长江大桥" "http://127.0.0.1:11200/"
+```
+
+返回结果如下：
+
+```
+["南京市", "长江大桥"]
+```
+
+因为 HTTP GET 请求有长度限制，如果需要请求长文的，请使用POST请求。
+
+### 安装服务(仅限 linux 系统)
+
+如果有需要**安装使用**的，可以按照如下操作：
+```
+sudo make install
+```
+
+### 服务启动和停止(仅限 linux 系统)
+
+```
+cd /usr/local/cppjieba
+./script/cjserver.start
+./script/cjserver.stop
+```
+
+### 卸载服务(仅限 linux 系统)
+
 ```sh
-cd build/
-cat install_manifest.txt | sudo xargs rm -rf
+rm -rf /usr/local/cppjieba
 ```
 
-## 分词效果
+## Docker 示例
 
-### MPSegment's demo
+安装和启动
+
+```
+sudo docker pull yanyiwu/cppjieba
+sudo docker run -d -P yanyiwu/cppjieba
+```
+
+```
+sudo docker ps
+```
+
+```
+CONTAINER ID        IMAGE                     COMMAND                CREATED             STATUS              PORTS                      NAMES
+7c29325e9c20        yanyiwu/cppjieba:latest   "./bin/cjserver ../t   4 minutes ago       Up 4 minutes        0.0.0.0:49160->11200/tcp   angry_wilson        
+```
+
+可以看到正在运行的 Docker 容器(容器内运行着 `cjserver` 服务)，并且服务的端口号被映射为 `0.0.0.0:49160` 。
+
+所以现在可以来一发测试了：
+
+```
+curl "http://0.0.0.0:49160/?key=南京市长江大桥"
+```
+
+预期结果如下：
+
+```
+["南京市", "长江大桥"]
+```
+
+### 分词结果示例
+
+**MPSegment**
 
 Output:
 ```
@@ -83,9 +202,8 @@ Output:
 
 ```
 
-### HMMSegment's demo
+**HMMSegment**
 
-Output:
 ```
 我来到北京清华大学
 我来/到/北京/清华大学
@@ -98,9 +216,8 @@ Output:
 
 ```
 
-### MixSegment's demo
+**MixSegment**
 
-Output:
 ```
 我来到北京清华大学
 我/来到/北京/清华大学
@@ -113,9 +230,8 @@ Output:
 
 ```
 
-### FullSegment's demo
+**FullSegment**
 
-Output:
 ```
 我来到北京清华大学
 我/来到/北京/清华/清华大学/华大/大学
@@ -128,9 +244,8 @@ Output:
 
 ```
 
-### QuerySegment's demo
+**QuerySegment**
 
-Output:
 ```
 我来到北京清华大学
 我/来到/北京/清华/清华大学/华大/大学
@@ -143,8 +258,6 @@ Output:
 
 ```
 
-### 效果分析
-
 以上依次是MP,HMM,Mix三种方法的效果。  
 
 可以看出效果最好的是Mix，也就是融合MP和HMM的切词算法。即可以准确切出词典已有的词，又可以切出像"杭研"这样的未登录词。
@@ -153,37 +266,62 @@ Full方法切出所有字典里的词语。
 
 Query方法先使用Mix方法切词，对于切出来的较长的词再使用Full方法。
 
+### 自定义用户词典
+
+自定义词典示例请看`dict/user.dict.utf8`。
+
+没有使用自定义用户词典时的结果:
+
+```
+令狐冲/是/云/计算/行业/的/专家
+```
+
+使用自定义用户词典时的结果:
+
+```
+令狐冲/是/云计算/行业/的/专家
+```
+
 ### 关键词抽取
 
 ```
-make && ./test/keyword.demo
+我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。
+["CEO:11.7392", "升职:10.8562", "加薪:10.6426", "手扶拖拉机:10.0089", "巅峰:9.49396"]
 ```
 
-you will see:
-
-```
-我是蓝翔技工拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上总经理，出任CEO，迎娶白富美，走上人生巅峰。
- ->
-["CEO:11.7392", "蓝翔:11.7392", "白富美:11.7392", "升职:10.8562", "加薪:10.6426"]
-```
-
-关键词抽取的demo代码请见`test/keyword_demo.cpp`
+详细请见 `test/demo.cpp`.
 
 ### 词性标注
 
 ```
-make && ./test/tagging_demo
+我是蓝翔技工拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上总经理，出任CEO，迎娶白富美，走上人生巅峰。
+["我:r", "是:v", "拖拉机:n", "学院:n", "手扶拖拉机:n", "专业:n", "的:uj", "。:x", "不用:v", "多久:m", "，:x", "我:r", "就:d", "会:v", "升职:v", "加薪:nr", "，:x", "当上:t", "CEO:eng", "，:x", "走上:v", "人生:n", "巅峰:n", "。:x"]
 ```
 
+详细请看 `test/demo.cpp`.
+
+支持自定义词性。
+比如在(`dict/user.dict.utf8`)增加一行
+
 ```
-["我:r", "是:v", "蓝翔:x", "技工:n", "拖拉机:n", "学院:n", "手扶拖拉机:n", "专业:n", "的:uj", "。:x", "不用:v", "多久:m", "，:x", "我:r", "就:d", "会:v", "升职:v", "加薪:nr", "，:x", "当:t", "上:f", "总经理:n", "，:x", "出任:v", "CEO:x", "，:x", "迎娶:v", "白富美:x", "，:x", "走上:v", "人生:n", "巅峰:n", "。:x"]
+蓝翔 nz
 ```
 
-__词性标注是一个未完成的部分，现在只是一个简单版本。__
+结果如下：
 
+```
+["我:r", "是:v", "蓝翔:nz", "技工:n", "拖拉机:n", "学院:n", "手扶拖拉机:n", "专业:n", "的:uj", "。:x", "不用:v", "多久:m", "，:x", "我:r", "就:d", "会:v", "升职:v", "加薪:nr", "，:x", "当:t", "上:f", "总经理:n", "，:x", "出任:v", "CEO:eng", "，:x", "迎娶:v", "白富美:x", "，:x", "走上:v", "人生:n", "巅峰:n", "。:x"]
+```
 
+## 其它词典资料分享
 
-## 相关应用
++ [dict.367W.utf8.tar.gz] iLife(`562193561@qq.com`)
+
+## 应用
+
+### GoJieba
+
+如果有需要在 Go 中使用分词，不妨试一下 [GoJieba] 。
 
 ### 关于CppJieba的跨语言包装使用
 
@@ -199,26 +337,84 @@ __词性标注是一个未完成的部分，现在只是一个简单版本。__
 
 如果有需要在处理中文文档的的相似度计算，不妨试一下[simhash]。
 
-## 演示
+### exjieba
+
+如果有需要在`erlang`中使用分词的话，不妨试一下[exjieba]。
+
+### jiebaR
+
+如果有需要在`R`中使用分词的话，不妨试一下[jiebaR]。
+
+### libcppjieba
+
+[libcppjieba] 是最简单易懂的CppJieba头文件库使用示例。
+
+### keyword\_server
+
+[KeywordServer] 50行搭建一个**中文关键词抽取服务**。
+
+### ngx\_http\_cppjieba\_module
+
+如果有需要在`Nginx`中使用分词模块的话，不妨试一下[ngx_http_cppjieba_module]。
+
+### cjieba
+
+如果有需要在 C语言 中使用分词模块的话，不妨试一下[cjieba]。
+
+### jieba\_rb
+
+如果有需要在 Ruby 中使用分词模块的话，不妨试一下[jieba_rb]。
+
+### iosjieba
+
+如果有需要在 iOS 开发中使用分词模块的话，不妨参考一下 [iosjieba]。
+
+## 线上演示
 
 http://cppjieba-webdemo.herokuapp.com/
 (建议使用chrome打开)
 
+## 性能评测
+
+[Jieba中文分词系列性能评测]
+
 ## 客服
 
-如果有运行问题或者任何疑问，欢迎联系 : wuyanyi09@gmail.com
+Email: `i@yanyiwu.com`
+QQ: 64162451
+
+![image](http://7viirv.com1.z0.glb.clouddn.com/5a7d1b5c0d_yanyiwu_personal_qrcodes.jpg)
 
 ## 鸣谢
 
 "结巴"中文分词作者: SunJunyi  
 https://github.com/fxsjy/jieba
 
-顾名思义，之所以叫CppJieba，是参照Jieba分词Python程序写成的，所以饮水思源，再次感谢SunJunyi。
+## 许可证
 
-[CppJieba]:https://github.com/aszxqw/cppjieba
+MIT http://yanyiwu.mit-license.org
+
+## 作者
+
+- yanyiwu https://github.com/yanyiwu i@yanyiwu.com
+- aholic https://github.com/aholic ruochen.xu@gmail.com
+
+[GoJieba]:https://github.com/yanyiwu/gojieba
+[CppJieba]:https://github.com/yanyiwu/cppjieba
 [jannson]:https://github.com/jannson
 [cppjiebapy]:https://github.com/jannson/cppjiebapy
-[cppjiebapy_discussion]:https://github.com/aszxqw/cppjieba/issues/1
-[NodeJieba]:https://github.com/aszxqw/nodejieba
-[simhash]:https://github.com/aszxqw/simhash
-[代码详解]:http://aszxqw.github.io/jekyll/update/2014/02/10/cppjieba-dai-ma-xiang-jie.html
+[cppjiebapy_discussion]:https://github.com/yanyiwu/cppjieba/issues/1
+[NodeJieba]:https://github.com/yanyiwu/nodejieba
+[jiebaR]:https://github.com/qinwf/jiebaR
+[simhash]:https://github.com/yanyiwu/simhash
+[代码详解]:https://github.com/yanyiwu/cppjieba/wiki/CppJieba%E4%BB%A3%E7%A0%81%E8%AF%A6%E8%A7%A3
+[libcppjieba]:https://github.com/yanyiwu/libcppjieba
+[issue25]:https://github.com/yanyiwu/cppjieba/issues/25
+[exjieba]:https://github.com/falood/exjieba
+[KeywordServer]:https://github.com/yanyiwu/keyword_server
+[ngx_http_cppjieba_module]:https://github.com/yanyiwu/ngx_http_cppjieba_module
+[dict.367W.utf8.tar.gz]:http://pan.baidu.com/s/1o6A0BWY
+[cjieba]:http://github.com/yanyiwu/cjieba
+[jieba_rb]:https://github.com/altkatz/jieba_rb
+[iosjieba]:https://github.com/yanyiwu/iosjieba
+[Jieba中文分词系列性能评测]:http://yanyiwu.com/work/2015/06/14/jieba-series-performance-test.html

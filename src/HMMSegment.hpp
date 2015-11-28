@@ -5,331 +5,176 @@
 #include <fstream>
 #include <memory.h>
 #include <cassert>
-#include "Limonp/str_functs.hpp"
-#include "Limonp/logger.hpp"
-#include "TransCode.hpp"
-#include "ISegment.hpp"
+#include "HMMModel.hpp"
 #include "SegmentBase.hpp"
-#include "Trie.hpp"
 
-namespace CppJieba
-{
-    using namespace Limonp;
-    typedef unordered_map<uint16_t, double> EmitProbMap;
-    class HMMSegment: public SegmentBase
-    {
-        public:
-            /*
-             * STATUS:
-             * 0:B, 1:E, 2:M, 3:S
-             * */
-            enum {B = 0, E = 1, M = 2, S = 3, STATUS_SUM = 4};
-        private:
-            char _statMap[STATUS_SUM];
-            double _startProb[STATUS_SUM];
-            double _transProb[STATUS_SUM][STATUS_SUM];
-            EmitProbMap _emitProbB;
-            EmitProbMap _emitProbE;
-            EmitProbMap _emitProbM;
-            EmitProbMap _emitProbS;
-            vector<EmitProbMap* > _emitProbVec;
+namespace cppjieba {
+class HMMSegment: public SegmentBase {
+ public:
+  HMMSegment(const string& filePath) {
+    model_ = new HMMModel(filePath);
+  }
+  HMMSegment(const HMMModel* model) 
+  : model_(model), isNeedDestroy_(false) {
+  }
+  ~HMMSegment() {
+    if (isNeedDestroy_) {
+      delete model_;
+    }
+  }
 
-        public:
-            HMMSegment(){_setInitFlag(false);}
-            explicit HMMSegment(const string& filePath)
-            {
-                _setInitFlag(init(filePath));
-            }
-            virtual ~HMMSegment(){}
-        public:
-            bool init(const string& filePath)
-            {
-                if(_getInitFlag())
-                {
-                    LogError("inited already.");
-                    return false;
-                }
-                memset(_startProb, 0, sizeof(_startProb));
-                memset(_transProb, 0, sizeof(_transProb));
-                _statMap[0] = 'B';
-                _statMap[1] = 'E';
-                _statMap[2] = 'M';
-                _statMap[3] = 'S';
-                _emitProbVec.push_back(&_emitProbB);
-                _emitProbVec.push_back(&_emitProbE);
-                _emitProbVec.push_back(&_emitProbM);
-                _emitProbVec.push_back(&_emitProbS);
-                if(!_setInitFlag(_loadModel(filePath.c_str())))
-                {
-                    LogError("_loadModel(%s) failed.", filePath.c_str());
-                    return false;
-                }
-                LogInfo("HMMSegment init(%s) ok.", filePath.c_str());
-                return true;
-            }
-        public:
-            using SegmentBase::cut;
-            bool cut(Unicode::const_iterator begin, Unicode::const_iterator end, vector<Unicode>& res)const 
-            {
-                if(!_getInitFlag())
-                {
-                    LogError("not inited.");
-                    return false;
-                }
-                vector<size_t> status; 
-                if(!_viterbi(begin, end, status))
-                {
-                    LogError("_viterbi failed.");
-                    return false;
-                }
+  void Cut(const string& sentence, 
+        vector<string>& words) const {
+    PreFilter pre_filter(symbols_, sentence);
+    PreFilter::Range range;
+    vector<Unicode> uwords;
+    uwords.reserve(sentence.size());
+    while (pre_filter.HasNext()) {
+      range = pre_filter.Next();
+      Cut(range.begin, range.end, uwords);
+    }
+    TransCode::Encode(uwords, words);
+  }
+  void Cut(Unicode::const_iterator begin, Unicode::const_iterator end, vector<Unicode>& res) const {
+    Unicode::const_iterator left = begin;
+    Unicode::const_iterator right = begin;
+    while (right != end) {
+      if (*right < 0x80) {
+        if (left != right) {
+          InternalCut(left, right, res);
+        }
+        left = right;
+        do {
+          right = SequentialLetterRule(left, end);
+          if (right != left) {
+            break;
+          }
+          right = NumbersRule(left, end);
+          if (right != left) {
+            break;
+          }
+          right ++;
+        } while (false);
+        res.push_back(Unicode(left, right));
+        left = right;
+      } else {
+        right++;
+      }
+    }
+    if (left != right) {
+      InternalCut(left, right, res);
+    }
+  }
+ private:
+  // sequential letters rule
+  Unicode::const_iterator SequentialLetterRule(Unicode::const_iterator begin, Unicode::const_iterator end) const {
+    Rune x = *begin;
+    if (('a' <= x && x <= 'z') || ('A' <= x && x <= 'Z')) {
+      begin ++;
+    } else {
+      return begin;
+    }
+    while (begin != end) {
+      x = *begin;
+      if (('a' <= x && x <= 'z') || ('A' <= x && x <= 'Z') || ('0' <= x && x <= '9')) {
+        begin ++;
+      } else {
+        break;
+      }
+    }
+    return begin;
+  }
+  //
+  Unicode::const_iterator NumbersRule(Unicode::const_iterator begin, Unicode::const_iterator end) const {
+    Rune x = *begin;
+    if ('0' <= x && x <= '9') {
+      begin ++;
+    } else {
+      return begin;
+    }
+    while (begin != end) {
+      x = *begin;
+      if ( ('0' <= x && x <= '9') || x == '.') {
+        begin++;
+      } else {
+        break;
+      }
+    }
+    return begin;
+  }
+  void InternalCut(Unicode::const_iterator begin, Unicode::const_iterator end, vector<Unicode>& res) const {
+    vector<size_t> status;
+    Viterbi(begin, end, status);
 
-                Unicode::const_iterator left = begin;
-                Unicode::const_iterator right;
-                for(size_t i =0; i< status.size(); i++)
-                {
-                    if(status[i] % 2) //if(E == status[i] || S == status[i])
-                    {
-                        right = begin + i + 1;
-                        res.push_back(Unicode(left, right));
-                        left = right;
-                    }
-                }
-                return true;
-            }
-        public:
-            virtual bool cut(Unicode::const_iterator begin, Unicode::const_iterator end, vector<string>& res)const
-            {
-                assert(_getInitFlag());
-                if(begin == end)
-                {
-                    return false;
-                }
-                vector<Unicode> words;
-                if(!cut(begin, end, words))
-                {
-                    return false;
-                }
-                string tmp;
-                for(size_t i = 0; i < words.size(); i++)
-                {
-                    if(TransCode::encode(words[i], tmp))
-                    {
-                        res.push_back(tmp);
-                    }
-                }
-                return true;
-            }
+    Unicode::const_iterator left = begin;
+    Unicode::const_iterator right;
+    for (size_t i = 0; i < status.size(); i++) {
+      if (status[i] % 2) { //if (HMMModel::E == status[i] || HMMModel::S == status[i])
+        right = begin + i + 1;
+        res.push_back(Unicode(left, right));
+        left = right;
+      }
+    }
+  }
 
-        private:
-            bool _viterbi(Unicode::const_iterator begin, Unicode::const_iterator end, vector<size_t>& status)const
-            {
-                if(begin == end)
-                {
-                    return false;
-                }
+  void Viterbi(Unicode::const_iterator begin, 
+        Unicode::const_iterator end, 
+        vector<size_t>& status) const {
+    size_t Y = HMMModel::STATUS_SUM;
+    size_t X = end - begin;
 
-                size_t Y = STATUS_SUM;
-                size_t X = end - begin;
-                size_t XYSize = X * Y;
-                int * path;
-                double * weight;
-                size_t now, old, stat;
-                double tmp, endE, endS;
+    size_t XYSize = X * Y;
+    size_t now, old, stat;
+    double tmp, endE, endS;
 
-                path = new int [XYSize];
-                assert(path);
-                weight = new double [XYSize];
-                assert(weight);
+    vector<int> path(XYSize);
+    vector<double> weight(XYSize);
 
-                //start
-                for(size_t y = 0; y < Y; y++)
-                {
-                    weight[0 + y * X] = _startProb[y] + _getEmitProb(_emitProbVec[y], *begin, MIN_DOUBLE);
-                    path[0 + y * X] = -1;
-                }
-                //process
-                //for(; begin != end; begin++)
-                for(size_t x = 1; x < X; x++)
-                {
-                    for(size_t y = 0; y < Y; y++)
-                    {
-                        now = x + y*X;
-                        weight[now] = MIN_DOUBLE;
-                        path[now] = E; // warning
-                        for(size_t preY = 0; preY < Y; preY++)
-                        {
-                            old = x - 1 + preY * X;
-                            tmp = weight[old] + _transProb[preY][y] + _getEmitProb(_emitProbVec[y], *(begin+x), MIN_DOUBLE);
-                            if(tmp > weight[now])
-                            {
-                                weight[now] = tmp;
-                                path[now] = preY;
-                            }
-                        }
-                    }
-                }
+    //start
+    for (size_t y = 0; y < Y; y++) {
+      weight[0 + y * X] = model_->startProb[y] + model_->GetEmitProb(model_->emitProbVec[y], *begin, MIN_DOUBLE);
+      path[0 + y * X] = -1;
+    }
 
-                endE = weight[X-1+E*X];
-                endS = weight[X-1+S*X];
-                stat = 0;
-                if(endE > endS)
-                {
-                    stat = E;
-                }
-                else
-                {
-                    stat = S;
-                }
+    double emitProb;
 
-                status.assign(X, 0);
-                for(int x = X -1 ; x >= 0; x--)
-                {
-                    status[x] = stat;
-                    stat = path[x + stat*X];
-                }
+    for (size_t x = 1; x < X; x++) {
+      for (size_t y = 0; y < Y; y++) {
+        now = x + y*X;
+        weight[now] = MIN_DOUBLE;
+        path[now] = HMMModel::E; // warning
+        emitProb = model_->GetEmitProb(model_->emitProbVec[y], *(begin+x), MIN_DOUBLE);
+        for (size_t preY = 0; preY < Y; preY++) {
+          old = x - 1 + preY * X;
+          tmp = weight[old] + model_->transProb[preY][y] + emitProb;
+          if (tmp > weight[now]) {
+            weight[now] = tmp;
+            path[now] = preY;
+          }
+        }
+      }
+    }
 
-                delete [] path;
-                delete [] weight;
-                return true;
-            }
-            bool _loadModel(const char* const filePath)
-            {
-                LogDebug("loadModel [%s] start ...", filePath);
-                ifstream ifile(filePath);
-                string line;
-                vector<string> tmp;
-                vector<string> tmp2;
-                //load _startProb
-                if(!_getLine(ifile, line))
-                {
-                    return false;
-                }
-                split(line, tmp, " ");
-                if(tmp.size() != STATUS_SUM)
-                {
-                    LogError("start_p illegal");
-                    return false;
-                }
-                for(size_t j = 0; j< tmp.size(); j++)
-                {
-                    _startProb[j] = atof(tmp[j].c_str());
-                    //cout<<_startProb[j]<<endl;
-                }
+    endE = weight[X-1+HMMModel::E*X];
+    endS = weight[X-1+HMMModel::S*X];
+    stat = 0;
+    if (endE >= endS) {
+      stat = HMMModel::E;
+    } else {
+      stat = HMMModel::S;
+    }
 
-                //load _transProb
-                for(size_t i = 0; i < STATUS_SUM; i++)
-                {
-                    if(!_getLine(ifile, line))
-                    {
-                        return false;
-                    }
-                    split(line, tmp, " ");
-                    if(tmp.size() != STATUS_SUM)
-                    {
-                        LogError("trans_p illegal");
-                        return false;
-                    }
-                    for(size_t j =0; j < STATUS_SUM; j++)
-                    {
-                        _transProb[i][j] = atof(tmp[j].c_str());
-                        //cout<<_transProb[i][j]<<endl;
-                    }
-                }
+    status.resize(X);
+    for (int x = X -1 ; x >= 0; x--) {
+      status[x] = stat;
+      stat = path[x + stat*X];
+    }
+  }
 
-                //load _emitProbB
-                if(!_getLine(ifile, line) || !_loadEmitProb(line, _emitProbB))
-                {
-                    return false;
-                }
+  const HMMModel* model_;
+  bool isNeedDestroy_;
+}; // class HMMSegment
 
-                //load _emitProbE
-                if(!_getLine(ifile, line) || !_loadEmitProb(line, _emitProbE))
-                {
-                    return false;
-                }
-
-                //load _emitProbM
-                if(!_getLine(ifile, line) || !_loadEmitProb(line, _emitProbM))
-                {
-                    return false;
-                }
-
-                //load _emitProbS
-                if(!_getLine(ifile, line) || !_loadEmitProb(line, _emitProbS))
-                {
-                    return false;
-                }
-
-                LogDebug("loadModel [%s] end.", filePath);
-
-                return true;
-            }
-            bool _getLine(ifstream& ifile, string& line)
-            {
-                while(getline(ifile, line))
-                {
-                    trim(line);
-                    if(line.empty())
-                    {
-                        continue;
-                    }
-                    if(startsWith(line, "#"))
-                    {
-                        continue;
-                    }
-                    return true;
-                }
-                return false;
-            }
-            bool _loadEmitProb(const string& line, EmitProbMap& mp)
-            {
-                if(line.empty())
-                {
-                    return false;
-                }
-                vector<string> tmp, tmp2;
-                uint16_t unico = 0;
-                split(line, tmp, ",");
-                for(size_t i = 0; i < tmp.size(); i++)
-                {
-                    split(tmp[i], tmp2, ":");
-                    if(2 != tmp2.size())
-                    {
-                        LogError("_emitProb illegal.");
-                        return false;
-                    }
-                    if(!_decodeOne(tmp2[0], unico))
-                    {
-                        LogError("TransCode failed.");
-                        return false;
-                    }
-                    mp[unico] = atof(tmp2[1].c_str());
-                }
-                return true;
-            }
-            bool _decodeOne(const string& str, uint16_t& res)
-            {
-                Unicode ui16;
-                if(!TransCode::decode(str, ui16) || ui16.size() != 1)
-                {
-                    return false;
-                }
-                res = ui16[0];
-                return true;
-            }
-            double _getEmitProb(const EmitProbMap* ptMp, uint16_t key, double defVal)const 
-            {
-                EmitProbMap::const_iterator cit = ptMp->find(key);
-                if(cit == ptMp->end())
-                {
-                    return defVal;
-                }
-                return cit->second;
-
-            }
-
-
-    };
-}
+} // namespace cppjieba
 
 #endif
