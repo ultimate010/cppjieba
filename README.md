@@ -12,7 +12,7 @@ CppJieba是"结巴(Jieba)"中文分词的C++版本
 + 支持`utf-8, gbk`编码，但是推荐使用`utf-8`编码， 因为`gbk`编码缺少严格测试，慎用。
 + 内置分词服务`server/server.cpp`，在linux环境下可安装使用(可选)，可通过http参数选择不同分词算法进行分词。
 + 项目自带较为完善的单元测试，核心功能中文分词(utf8)的稳定性接受过线上环境检验。
-+ 支持载自定义用户词典。
++ 支持载自定义用户词典，多路径时支持分隔符'|'或者';'分隔。
 + 支持 `linux` , `mac osx` 操作系统。
 + 支持 `Docker`。
 + 提供 C语言 api接口调用 [cjieba]。
@@ -50,27 +50,22 @@ make test
 结果示例：
 
 ```
-[demo] METHOD_MP
-我/是/拖拉机/学院/手扶拖拉机/专业/的/。/不用/多久/，/我/就/会/升职/加薪/，/当/上/C/E/O/，/走上/人生/巅峰/。
-
-[demo] METHOD_HMM
-我/是/拖拉机/学院/手/扶/拖拉机/专业/的/。/不用/多久/，/我/就/会升/职加薪/，/当上/CEO/，/走上/人生/巅峰/。
-
-[demo] METHOD_MIX
+[demo] Cut With HMM
 我/是/拖拉机/学院/手扶拖拉机/专业/的/。/不用/多久/，/我/就/会/升职/加薪/，/当上/CEO/，/走上/人生/巅峰/。
-
-[demo] METHOD_FULL
-我/是/拖拉/拖拉机/学院/手扶/手扶拖拉机/拖拉/拖拉机/专业/的/。/不用/多久/，/我/就/会升/升职/加薪/，/当上/C/E/O/，/走上/人生/巅峰/。
-[demo] METHOD_QUERY
+[demo] Cut Without HMM
+我/是/拖拉机/学院/手扶拖拉机/专业/的/。/不用/多久/，/我/就/会/升职/加薪/，/当/上/C/E/O/，/走上/人生/巅峰/。
+[demo] CutAll
+我/是/拖拉/拖拉机/学院/手扶/手扶拖拉机/拖拉/拖拉机/专业/的/。/不用/多久/，/我/就/会升/升职/加薪/，/当上/C/E/O/，/走上/人生/巅峰/。[demo] CutForSearch
 我/是/拖拉机/学院/手扶/手扶拖拉机/拖拉/拖拉机/专业/的/。/不用/多久/，/我/就/会/升职/加薪/，/当上/CEO/，/走上/人生/巅峰/。
-
+[demo] Insert User Word
+男默/女泪
+男默女泪
+[demo] Locate Words
+南京市, 0, 3
+长江大桥, 3, 7
 [demo] TAGGING
 我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。
 ["我:r", "是:v", "拖拉机:n", "学院:n", "手扶拖拉机:n", "专业:n", "的:uj", "。:x", "不用:v", "多久:m", "，:x", "我:r", "就:d", "会:v", "升职:v", "加薪:nr", "，:x", "当上:t", "CEO:eng", "，:x", "走上:v", "人生:n", "巅峰:n", "。:x"]
-
-[demo] KEYWORD
-我是拖拉机学院手扶拖拉机专业的。不用多久，我就会升职加薪，当上CEO，走上人生巅峰。
-["CEO:11.7392", "升职:10.8562", "加薪:10.6426", "手扶拖拉机:10.0089", "巅峰:9.49396"]
 ```
 
 详细请看 `test/demo.cpp`.
@@ -319,55 +314,20 @@ Query方法先使用Mix方法切词，对于切出来的较长的词再使用Ful
 
 ## 应用
 
-### GoJieba
-
-如果有需要在 Go 中使用分词，不妨试一下 [GoJieba] 。
-
-### 关于CppJieba的跨语言包装使用
-
-收到邮件询问跨语言包装(ios应用开发)使用的问题，这方面我没有相关的经验，建议参考如下python使用cppjieba的项目：
-
-[jannson] 开发的供 python模块调用的项目 [cppjiebapy] ,  和相关讨论 [cppjiebapy_discussion] .
-
-### NodeJieba
-
-如果有需要在`node.js`中使用分词，不妨试一下[NodeJieba]。
-
-### simhash
-
-如果有需要在处理中文文档的的相似度计算，不妨试一下[simhash]。
-
-### exjieba
-
-如果有需要在`erlang`中使用分词的话，不妨试一下[exjieba]。
-
-### jiebaR
-
-如果有需要在`R`中使用分词的话，不妨试一下[jiebaR]。
-
-### libcppjieba
-
-[libcppjieba] 是最简单易懂的CppJieba头文件库使用示例。
-
-### keyword\_server
-
-[KeywordServer] 50行搭建一个**中文关键词抽取服务**。
-
-### ngx\_http\_cppjieba\_module
-
-如果有需要在`Nginx`中使用分词模块的话，不妨试一下[ngx_http_cppjieba_module]。
-
-### cjieba
-
-如果有需要在 C语言 中使用分词模块的话，不妨试一下[cjieba]。
-
-### jieba\_rb
-
-如果有需要在 Ruby 中使用分词模块的话，不妨试一下[jieba_rb]。
-
-### iosjieba
-
-如果有需要在 iOS 开发中使用分词模块的话，不妨参考一下 [iosjieba]。
++ [GoJieba] go语言版本的结巴中文分词。
++ [cppjiebapy] 由 [jannson] 开发的供 python 模块调用的项目 [cppjiebapy], 相关讨论 [cppjiebapy_discussion] .
++ [NodeJieba] Node.js 版本的结巴中文分词。
++ [simhash] 中文文档的的相似度计算
++ [exjieba] Erlang 版本的结巴中文分词。
++ [jiebaR] R语言版本的结巴中文分词。
++ [libcppjieba] 是最简单易懂的CppJieba头文件库使用示例库。
++ [KeywordServer] 50行搭建一个中文关键词抽取服务。
++ [cjieba] C语言版本的结巴分词。
++ [jieba_rb] Ruby 版本的结巴分词。
++ [iosjieba] iOS 版本的结巴分词。
++ [pg_jieba] PostgreSQL 数据库的分词插件。
++ [ngx_http_cppjieba_module] Nginx 分词插件。
++ [gitbook-plugin-search-pro] 支持中文搜索的 gitbook 插件。
 
 ## 线上演示
 
@@ -380,15 +340,14 @@ http://cppjieba-webdemo.herokuapp.com/
 
 ## 客服
 
-Email: `i@yanyiwu.com`
-QQ: 64162451
++ Email: `i@yanyiwu.com`
++ QQ: 64162451
 
 ![image](http://7viirv.com1.z0.glb.clouddn.com/5a7d1b5c0d_yanyiwu_personal_qrcodes.jpg)
 
 ## 鸣谢
 
-"结巴"中文分词作者: SunJunyi  
-https://github.com/fxsjy/jieba
+"结巴"中文分词作者: SunJunyi https://github.com/fxsjy/jieba
 
 ## 许可证
 
@@ -418,3 +377,5 @@ MIT http://yanyiwu.mit-license.org
 [jieba_rb]:https://github.com/altkatz/jieba_rb
 [iosjieba]:https://github.com/yanyiwu/iosjieba
 [Jieba中文分词系列性能评测]:http://yanyiwu.com/work/2015/06/14/jieba-series-performance-test.html
+[pg_jieba]:https://github.com/jaiminpan/pg_jieba
+[gitbook-plugin-search-pro]:https://plugins.gitbook.com/plugin/search-pro
